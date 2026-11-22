@@ -28,6 +28,7 @@ const NOW = env("NOW_OVERRIDE") ? new Date(env("NOW_OVERRIDE")) : new Date();
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const readJson = (f, d) => (fs.existsSync(f) ? JSON.parse(fs.readFileSync(f, "utf8")) : d);
 const log = (...a) => console.log(...a);
+const isUrl = (m) => /^https?:\/\//i.test(m || "");
 
 // ---------- validation ----------
 function validate(queue) {
@@ -45,7 +46,8 @@ function validate(queue) {
     if (typeof p.caption !== "string" || !p.caption.trim()) errs.push(`${tag}: caption is empty`);
     const media = Array.isArray(p.media) ? p.media : [];
     if (!media.length) errs.push(`${tag}: no media files`);
-    for (const m of media) if (!fs.existsSync(path.join(ROOT, m))) errs.push(`${tag}: file not found: ${m}`);
+    for (const m of media) if (!isUrl(m) && !fs.existsSync(path.join(ROOT, m))) errs.push(`${tag}: file not found: ${m}`);
+    const files = media.filter((m) => !isUrl(m)); // web links (like Drive images) skip the file-type checks
     const ok = {
       instagram: ["image", "carousel", "reel"],
       linkedin: ["image", "document"],
@@ -55,14 +57,14 @@ function validate(queue) {
       if ((p.caption || "").length > 2200) errs.push(`${tag}: Instagram caption over 2200 characters`);
       if (p.type === "carousel" && (media.length < 2 || media.length > 10)) errs.push(`${tag}: carousel needs 2 to 10 files`);
       if (p.type !== "carousel" && media.length !== 1) errs.push(`${tag}: ${p.type} takes exactly 1 file`);
-      if (p.type === "reel" && !/\.mp4$/i.test(media[0] || "")) errs.push(`${tag}: reel must be an .mp4`);
-      if (p.type !== "reel" && media.some((m) => !/\.(jpe?g|png)$/i.test(m))) errs.push(`${tag}: Instagram images must be .png or .jpg`);
+      if (p.type === "reel" && files.length && !/\.mp4$/i.test(files[0])) errs.push(`${tag}: reel must be an .mp4`);
+      if (p.type !== "reel" && files.some((m) => !/\.jpe?g$/i.test(m))) errs.push(`${tag}: Instagram images must be .jpg (Instagram doesn't accept PNG)`);
     }
     if (p.platform === "linkedin") {
       if ((p.caption || "").length > 3000) errs.push(`${tag}: LinkedIn post over 3000 characters`);
       if (media.length !== 1) errs.push(`${tag}: LinkedIn post takes exactly 1 file`);
-      if (p.type === "document" && !/\.pdf$/i.test(media[0] || "")) errs.push(`${tag}: LinkedIn document must be a .pdf`);
-      if (p.type === "image" && !/\.(jpe?g|png)$/i.test(media[0] || "")) errs.push(`${tag}: LinkedIn image must be .png or .jpg`);
+      if (p.type === "document" && files.length && !/\.pdf$/i.test(files[0])) errs.push(`${tag}: LinkedIn document must be a .pdf`);
+      if (p.type === "image" && files.some((m) => !/\.(jpe?g|png)$/i.test(m))) errs.push(`${tag}: LinkedIn image must be .png or .jpg`);
     }
   }
   return errs;
@@ -94,7 +96,7 @@ function igUrl(p, params = {}) {
   u.searchParams.set("access_token", process.env.IG_ACCESS_TOKEN);
   return u.toString();
 }
-const publicUrl = (file) => `${MEDIA_BASE_URL}/${file.split("/").map(encodeURIComponent).join("/")}`;
+const publicUrl = (file) => (isUrl(file) ? file : `${MEDIA_BASE_URL}/${file.split("/").map(encodeURIComponent).join("/")}`);
 
 async function igWaitReady(containerId, maxWaitMs) {
   const start = Date.now();
@@ -160,7 +162,7 @@ async function liUpload(kind, file) {
   const urn = json.value.image || json.value.document;
   await http("PUT", uploadUrl, {
     headers: { Authorization: `Bearer ${process.env.LINKEDIN_ACCESS_TOKEN}` },
-    raw: fs.readFileSync(path.join(ROOT, file)),
+    raw: isUrl(file) ? Buffer.from(await (await fetch(file)).arrayBuffer()) : fs.readFileSync(path.join(ROOT, file)),
   });
   return urn;
 }
@@ -170,7 +172,7 @@ async function postLinkedIn(p) {
   const file = p.media[0];
   const mediaUrn = await liUpload(p.type === "document" ? "documents" : "images", file);
   const media = { id: mediaUrn };
-  if (p.type === "document") media.title = p.document_title || path.basename(file, ".pdf");
+  if (p.type === "document") media.title = p.document_title || (isUrl(file) ? "Sheet Snacks recap" : path.basename(file, ".pdf"));
   const { headers } = await http("POST", `${LI_BASE}/rest/posts`, {
     headers: liHeaders(),
     body: {
@@ -219,7 +221,7 @@ async function main() {
 
   if (!due.length) return log("Nothing due right now.");
   if (!DRY && due.some((p) => p.platform === "instagram")) {
-    if (!MEDIA_BASE_URL) throw new Error("MEDIA_BASE_URL isn't set, so Instagram can't fetch the images");
+    if (!MEDIA_BASE_URL && due.some((p) => p.media.some((m) => !isUrl(m)))) throw new Error("MEDIA_BASE_URL isn't set, so Instagram can't fetch the images");
     for (const k of ["IG_USER_ID", "IG_ACCESS_TOKEN"]) if (!process.env[k]) throw new Error(`${k} isn't set`);
   }
   if (!DRY && due.some((p) => p.platform === "linkedin"))
