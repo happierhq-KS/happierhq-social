@@ -1,0 +1,15 @@
+name: Find my LinkedIn ID
+
+# Run once after adding LINKEDIN_ACCESS_TOKEN. Copy the urn it prints into the LINKEDIN_AUTHOR_URN secret.
+on: workflow_dispatch
+
+jobs:
+  whoami:
+    runs-on: ubuntu-latest
+    steps:
+      - env:
+          LINKEDIN_ACCESS_TOKEN: ${{ secrets.LINKEDIN_ACCESS_TOKEN }}
+        run: |
+          sub=$(curl -sS -H "Authorization: Bearer $LINKEDIN_ACCESS_TOKEN" https://api.linkedin.com/v2/userinfo | jq -r '.sub // empty')
+          if [ -z "$sub" ]; then echo "Couldn't read your profile. Check the token has the openid and profile scopes."; exit 1; fi
+          echo "Your LINKEDIN_AUTHOR_URN is:  urn:li:person:$sub"
