@@ -16,6 +16,7 @@ Quiz Stories still go up by hand. Instagram doesn't let any tool add stickers.
 ## Setup
 
 ### 1. The repo
+Done by Claude: public repo `happierhq-KS/happierhq-social`.
 1. Settings > Pages > Source: **Deploy from a branch**, branch `main`, folder `/ (root)`. Save.
 2. Settings > Secrets and variables > Actions > **Variables** tab > add `MEDIA_BASE_URL` = `https://happierhq-ks.github.io/happierhq-social`
 
